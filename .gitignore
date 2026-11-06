@@ -1,0 +1,12 @@
+# Secrets : jamais dans le dépôt
+.env
+.env.*
+*.pem
+*.key
+
+# Supabase CLI (état local)
+supabase/.temp/
+supabase/.branches/
+
+# macOS
+.DS_Store
