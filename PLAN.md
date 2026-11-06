@@ -11,7 +11,7 @@ Date : jeudi 5 novembre 2026. Premier engagement réel : coucher du vendredi 6 n
 2. **Les engagements sont « figés » à 23 h 00 la veille.** À ce moment, le serveur transforme le réglage (heures locales) en *obligations* avec des instants absolus (UTC). Le changement d'heure est résolu une fois, à ce moment-là. Toute la suite ne compare que des instants absolus.
 3. **pg_cron tourne en UTC.** On ne planifie donc rien « à 22 h 30 » dans cron. Un seul job tourne chaque minute (`tick`) et décide en heure de Paris ce qui est dû. Le changement d'heure n'a aucun effet sur cron.
 4. **Écarts proposés par rapport à ta demande (à valider, voir questions) :**
-   - **Code à 6 chiffres plutôt que clic sur le lien.** Sur iPhone, le lien magique s'ouvre dans Safari, pas dans l'appli installée (stockage séparé) : tu serais connecté dans Safari, pas dans la PWA. Même mécanisme Supabase (« magic link / OTP »), l'e-mail contient le code, tu le tapes dans l'appli.
+   - **Lien collé dans l'appli plutôt que clic sur le lien.** Sur iPhone, le lien magique s'ouvre dans Safari, pas dans l'appli installée (stockage séparé) : tu serais connecté dans Safari, pas dans la PWA. Tu copies le lien et tu le colles dans l'appli (voir décision 3 ; le code à 6 chiffres est impossible sans SMTP personnalisé).
    - **L'automatisation Raccourcis se déclenche à l'ouverture ET à la fermeture** d'Instagram/TikTok. Sinon : on ouvre Instagram hors ligne (l'appel échoue), on réactive le réseau, et plus rien n'est détecté.
    - **Scénarios de test.** Les vraies règles empêchent de tester ce soir (le coucher de ce soir a été figé hier, le réveil est à 9 h–10 h demain). Réglages contient donc « Lancer un scénario de test » : crée une obligation TEST qui commence maintenant (coucher : fenêtre de 10 min ; photo : fenêtre de 10 min commençant dans 1 min). Toujours marquée TEST, ne touche jamais les vraies obligations.
 
@@ -244,7 +244,7 @@ Ce soir, pour le critère final : lots 0 à 6. Lots 7 et 8 : vendredi avant 23 h
 2. ~~Créer le projet~~ : fait par Claude via le connecteur (décision 2). Ensuite, tu réinitialises toi-même le mot de passe DB (Project Settings → Database) et tu le ranges dans ton gestionnaire. Il ne passe jamais par le chat ; il ne sert qu'à `supabase link`.
 3. Auth → Users → Add user → `art.perrigot@gmail.com`, « Auto confirm ».
 4. Auth → Sign In / Providers → désactive « Allow new users to sign up ».
-5. Auth → Email Templates → « Magic Link » : je te donne le texte avec le code `{{ .Token }}` à coller.
+5. ~~Auth → Email Templates → « Magic Link »~~ : sans objet (modèle verrouillé sans SMTP personnalisé, voir décision 3).
 6. Installe la CLI : `brew install supabase/tap/supabase`, puis `supabase login` (ouvre le navigateur).
 7. GitHub : `gh auth status` (sinon `gh auth login`). Je crée le dépôt public `nonrefundable` et active Pages, ou tu le fais (Settings → Pages → Deploy from branch → main / root).
 8. Auth → URL Configuration → Site URL = `https://<ton-user>.github.io/nonrefundable/`.
@@ -253,7 +253,7 @@ Ce soir, pour le critère final : lots 0 à 6. Lots 7 et 8 : vendredi avant 23 h
 **iPhone, ce soir**
 10. Vérifie iOS ≥ 16.4 (Réglages → Général → Informations).
 11. Safari → URL Pages → Partager → « Sur l'écran d'accueil » → nom « Nonrefundable ».
-12. Ouvre depuis l'icône (pas depuis Safari). Connexion avec le code reçu par e-mail.
+12. Ouvre depuis l'icône (pas depuis Safari). Demande le lien, puis dans Mail : appui long sur le lien → « Copier » → colle-le dans l'appli.
 13. Réglages de l'appli → « Activer les notifications » → Autoriser.
 14. Réglages de l'appli → « Générer le jeton » → copie (affiché une seule fois).
 15. Raccourcis → Automatisation → + → App → Instagram → cocher « Est ouverte » et « Est fermée » → « Exécuter immédiatement », « Notifier lors de l'exécution » désactivé → action « Obtenir le contenu de l'URL » : URL de `app-signal`, méthode POST, en-tête `Authorization: Bearer <jeton>`, corps JSON `app = instagram`. Le guide pas à pas sera dans l'appli.
@@ -269,7 +269,7 @@ Ce soir, pour le critère final : lots 0 à 6. Lots 7 et 8 : vendredi avant 23 h
 
 1. **Supabase** : art.perrigot@gmail.com est le compte Supabase. Organisation « Stud'IA », 1 projet actif (« Aperrigot's Project ») : place pour le 2e. SMTP par défaut suffisant.
 2. **Création** : Claude crée le projet `nonrefundable` (eu-west-3, Stud'IA) via le connecteur Supabase et le dépôt public `Aperrigot/nonrefundable` via `gh`. Tu gardes : réglages Auth (étapes 3 à 5 et 8), CLI (étape 6), iPhone.
-3. **Connexion** : code à 6 chiffres tapé dans l'appli.
+3. **Connexion** : ~~code à 6 chiffres~~ → **lien collé dans l'appli** (décision du 6/11, 02:10). Le SMTP par défaut interdit de modifier le modèle d'e-mail, donc pas de code dans l'e-mail. Appui long sur le lien dans Mail → « Copier » → coller dans le champ de connexion de l'appli. L'appli extrait le paramètre `token` du lien et appelle `verifyOtp({ token_hash, type: 'magiclink' })` : la session est ouverte dans l'appli, pas dans Safari. Client supabase-js en `flowType: 'implicit'` (en PKCE, le jeton du lien serait préfixé `pkce_`). À vérifier au lot 2 sur l'iPhone. Repli si ça échoue : SMTP Gmail (mot de passe d'application) pour débloquer le modèle.
 4. **Plages** : coucher 20:00 → 04:00, réveil 05:00 → 12:00, pas de 15 min. Validées côté serveur dans `set_tomorrow`. Conséquence : un coucher entre 02:00 et 02:59 reste possible, le cas du changement d'heure reste donc testé.
 5. **Caution épuisée** : reste négatif affiché en orange (« 20 € à compléter »), les amendes continuent.
 6. **GitHub** : compte `Aperrigot`, dépôt public.
