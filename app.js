@@ -449,8 +449,95 @@ async function renderProof() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Historique et récap du mois
+// ---------------------------------------------------------------------------
+let historyMonth = null; // 'YYYY-MM-01'
+
+const monthLabel = (isoMonth) => new Date(`${isoMonth}T12:00:00Z`).toLocaleDateString('fr-FR', {
+  month: 'long', year: 'numeric', timeZone: TZ,
+});
+const shortDay = (isoDay) => new Date(`${isoDay}T12:00:00Z`).toLocaleDateString('fr-FR', {
+  day: '2-digit', month: '2-digit', timeZone: TZ,
+});
+const kindLabel = (k) => (k === 'bed' ? 'Coucher' : 'Réveil');
+
+function shiftMonth(isoMonth, delta) {
+  const [y, m] = isoMonth.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function recapText(r) {
+  const real = r.fines.filter((f) => !f.is_test);
+  const lines = [
+    `Nonrefundable, ${monthLabel(r.month)}`,
+    `Amendes : ${real.length} (${euros(r.due_cents)})`,
+    ...real.map((f) => `- ${shortDay(f.day)} ${kindLabel(f.kind)} : ${f.reason} (${euros(f.amount_cents)})`),
+    `Total dû ce mois : ${euros(r.due_cents)}`,
+  ];
+  if (r.deposit_cents) {
+    lines.push(`Caution : ${euros(r.deposit_cents)} versés à ${r.friend_name} le ${shortDay(r.paid_on)}.`);
+    lines.push(r.remaining_cents >= 0 ? `Reste : ${euros(r.remaining_cents)}.` : `À compléter : ${euros(-r.remaining_cents)}.`);
+  }
+  lines.push(`Jours libres : ${r.free_count}. Jours sans signal Raccourcis : ${r.silent_days}.`);
+  return lines.join('\n');
+}
+
 async function renderHistory() {
-  app.innerHTML = `<h1>Historique</h1><p class="muted">Lot 7 à venir.</p>`;
+  if (!historyMonth) {
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: TZ }); // YYYY-MM-DD
+    historyMonth = `${today.slice(0, 7)}-01`;
+  }
+  const r = DEMO
+    ? { month: historyMonth, due_cents: 1000, test_cents: 1000, deposit_cents: 10000, remaining_cents: 9000,
+        friend_name: 'Ami', paid_on: '2026-11-05', free_count: 1, silent_days: 0,
+        fines: [{ day: '2026-11-06', kind: 'wake', amount_cents: 1000, is_test: true, reason: 'Pas de photo avant 10:00' },
+                { day: '2026-11-06', kind: 'bed', amount_cents: 1000, is_test: false, reason: 'Instagram ouvert à 01:24' }] }
+    : await rpc('get_month_recap', { p_month: historyMonth });
+
+  const rows = r.fines.length
+    ? r.fines.slice().reverse().map((f) => `
+        <div class="ledger">
+          <div><span class="num">${esc(shortDay(f.day))}</span> · ${esc(kindLabel(f.kind))}${f.is_test ? ' <span class="tag">TEST</span>' : ''}
+            <div class="muted small">${esc(f.reason)}</div></div>
+          <div class="num ${f.is_test ? 'muted' : 'accent'}">${esc(euros(f.amount_cents))}</div>
+        </div>`).join('')
+    : '<p class="muted">Aucune amende ce mois.</p>';
+
+  app.innerHTML = `
+    <div class="month-nav">
+      <button class="icon-btn" id="prev" aria-label="Mois précédent">‹</button>
+      <h1>${esc(monthLabel(r.month))}</h1>
+      <button class="icon-btn" id="next" aria-label="Mois suivant">›</button>
+    </div>
+    <div class="card">
+      <div class="row"><span>Total dû</span><span class="num accent">${esc(euros(r.due_cents))}</span></div>
+      ${r.test_cents ? `<div class="row"><span>TEST (non déduit)</span><span class="num muted">${esc(euros(r.test_cents))}</span></div>` : ''}
+      <div class="row"><span>Reste de la caution</span><span class="num ${r.remaining_cents < 0 ? 'accent' : ''}">${
+        r.deposit_cents ? esc(r.remaining_cents >= 0 ? euros(r.remaining_cents) : `${euros(-r.remaining_cents)} à compléter`) : '—'}</span></div>
+      <div class="row"><span>Jours libres</span><span class="num">${r.free_count}</span></div>
+      <div class="row"><span>Jours sans signal</span><span class="num">${r.silent_days}</span></div>
+    </div>
+    <button class="btn" id="share">Partager le récap</button>
+    <p class="msg" id="share-msg"></p>
+    <h2>Grand livre</h2>
+    ${rows}`;
+
+  $('#prev').addEventListener('click', () => { historyMonth = shiftMonth(historyMonth, -1); renderHistory(); });
+  $('#next').addEventListener('click', () => { historyMonth = shiftMonth(historyMonth, 1); renderHistory(); });
+  $('#share').addEventListener('click', async () => {
+    const text = recapText(r);
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `Nonrefundable, ${monthLabel(r.month)}`, text });
+      } catch {
+        // partage annulé
+      }
+    } else {
+      await copy(text, $('#share-msg'));
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -504,9 +591,53 @@ function shortcutGuide(token) {
     ${token ? copyField('auth-header', 'Valeur de l\'en-tête Authorization', header) : ''}`;
 }
 
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+function base64UrlToBytes(s) {
+  const b64 = (s + '='.repeat((4 - (s.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+async function pushState() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = await reg?.pushManager.getSubscription();
+  return sub && Notification.permission === 'granted' ? 'on' : 'off';
+}
+
+async function enablePush() {
+  if (!('PushManager' in window) || !('Notification' in window)) {
+    throw new Error(isStandalone
+      ? 'Notifications non prises en charge (iOS 16.4 minimum).'
+      : 'Ouvre l\'appli depuis l\'icône de l\'écran d\'accueil pour activer les notifications.');
+  }
+  // Demandée en premier, directement dans le geste (exigence iOS).
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') throw new Error('Autorisation refusée. Réglages iOS, Notifications, Nonrefundable.');
+  const key = await rpc('get_vapid_public_key');
+  if (!key) throw new Error('Clé serveur absente. Réessaie dans une minute.');
+  const reg = await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription())
+    || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(key) });
+  const j = sub.toJSON();
+  await rpc('save_push_subscription', { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+}
+
+const PUSH_LABELS = {
+  on: 'Activées sur cet appareil.',
+  off: 'Désactivées sur cet appareil.',
+  denied: 'Bloquées. Réglages iOS, Notifications, Nonrefundable.',
+  unsupported: 'Non disponibles ici. Ouvre l\'appli depuis l\'écran d\'accueil (iOS 16.4 minimum).',
+};
+
 async function renderSettings() {
   const { data: { user } } = DEMO ? { data: { user: { email: EMAIL } } } : await sb.auth.getUser();
   const st = DEMO ? { has_token: false } : await rpc('get_shortcut_status');
+  const cfg = DEMO ? { deposit: null, real_start_date: '2026-11-06', start_editable: false } : await rpc('get_settings');
+  const push = await pushState();
+  const dep = cfg.deposit || {};
 
   const signal = st.last_signal_at
     ? `Dernier signal : ${esc(st.last_signal_app === 'tiktok' ? 'TikTok' : 'Instagram')}, ${esc(dateTime(st.last_signal_at))}.`
@@ -514,6 +645,36 @@ async function renderSettings() {
 
   app.innerHTML = `
     <h1>Réglages</h1>
+
+    <h2>Caution</h2>
+    <div class="stack">
+      <div><label for="dep-amount">Montant versé (€)</label>
+        <input id="dep-amount" type="number" inputmode="decimal" min="1" step="1" value="${dep.amount_cents ? dep.amount_cents / 100 : ''}"></div>
+      <div><label for="dep-friend">Prénom de l'ami</label>
+        <input id="dep-friend" type="text" autocomplete="off" maxlength="60" value="${esc(dep.friend_name || '')}"></div>
+      <div><label for="dep-date">Date du versement</label>
+        <input id="dep-date" type="date" value="${esc(dep.paid_on || '')}"></div>
+      <button class="btn secondary" id="dep-save">Enregistrer la caution</button>
+      <p class="msg" id="dep-msg"></p>
+    </div>
+
+    <h2>Date de début</h2>
+    <div class="stack">
+      <p>Réel à partir du coucher du <b>${esc(dayLabel(cfg.real_start_date))}</b>. Avant : amendes TEST, non déduites.</p>
+      ${cfg.start_editable ? `
+        <input id="start-date" type="date" value="${esc(cfg.real_start_date)}">
+        <button class="btn secondary" id="start-save">Changer la date de début</button>` :
+        '<p class="muted small">Date passée : verrouillée.</p>'}
+      <p class="msg" id="start-msg"></p>
+    </div>
+
+    <h2>Notifications</h2>
+    <div class="stack">
+      <p id="push-state">${esc(PUSH_LABELS[push])}</p>
+      ${push !== 'on' ? '<button class="btn" id="push-on">Activer les notifications</button>' : ''}
+      <button class="btn secondary" id="push-test">Tester les deux notifications</button>
+      <p class="msg" id="push-msg"></p>
+    </div>
 
     <h2>Raccourcis</h2>
     <div class="stack">
@@ -538,6 +699,56 @@ async function renderSettings() {
     </div>`;
 
   bindCopyButtons($('#token-msg'));
+
+  $('#dep-save').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      const amount = Math.round(Number(String($('#dep-amount').value).replace(',', '.')) * 100);
+      await rpc('set_deposit', { p_amount_cents: amount, p_friend_name: $('#dep-friend').value, p_paid_on: $('#dep-date').value || null });
+      say($('#dep-msg'), 'Caution enregistrée.');
+    } catch (err) {
+      say($('#dep-msg'), err.message, true);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+
+  $('#start-save')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await rpc('set_start_date', { p_date: $('#start-date').value });
+      say($('#start-msg'), 'Date de début enregistrée.');
+    } catch (err) {
+      say($('#start-msg'), err.message, true);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+
+  $('#push-on')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await enablePush();
+      say($('#push-state'), PUSH_LABELS.on);
+      e.target.hidden = true;
+    } catch (err) {
+      say($('#push-msg'), err.message, true);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+
+  $('#push-test').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await rpc('queue_test_push');
+      say($('#push-msg'), 'Envoyées. Elles arrivent en quelques secondes, même téléphone verrouillé.');
+    } catch (err) {
+      say($('#push-msg'), err.message, true);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
 
   $('#token').addEventListener('click', async (e) => {
     if (st.has_token && !confirm('L\'ancien jeton cessera de fonctionner. Il faudra mettre à jour les deux automatisations.')) return;

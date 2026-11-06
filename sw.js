@@ -1,6 +1,6 @@
 // Service worker : coquille hors ligne (réseau d'abord, cache en secours).
 // Les appels à Supabase (autre origine) ne passent jamais par le cache.
-const VERSION = 'nr-v5';
+const VERSION = 'nr-v6';
 const SHELL = [
   './',
   './index.html',
@@ -36,5 +36,38 @@ self.addEventListener('fetch', (event) => {
         return res;
       })
       .catch(() => caches.match(req, { ignoreSearch: true }).then((hit) => hit || caches.match('./index.html'))),
+  );
+});
+
+// Notifications Web Push (envoyées par l'Edge Function send-push).
+// iOS exige qu'un push affiche toujours une notification.
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil(self.registration.showNotification(data.title || 'Nonrefundable', {
+    body: data.body || '',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+    data: { url: data.url || './' },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || './', self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if ('focus' in client) {
+          client.navigate(url).catch(() => {});
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(url);
+    }),
   );
 });

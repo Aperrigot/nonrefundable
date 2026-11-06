@@ -175,3 +175,19 @@ textarea { resize: none; }
 .state { font-size: 19px; margin: 20px 0 4px; }
 #left { margin-bottom: 20px; }
 .btn + .btn { margin-top: 12px; }
+
+.month-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.month-nav h1 { margin: 8px 0 20px; text-transform: capitalize; text-align: center; flex: 1; font-size: 24px; }
+.icon-btn {
+  width: 44px; height: 44px; margin-bottom: 12px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); color: var(--text);
+  font-size: 24px; line-height: 1;
+  touch-action: manipulation;
+}
+.ledger {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--line);
+}
+.tag { font-size: 11px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 5px; }
+input[type="date"] { -webkit-appearance: none; appearance: none; min-height: 50px; }
