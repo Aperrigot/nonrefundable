@@ -278,3 +278,15 @@ Ce soir, pour le critère final : lots 0 à 6. Lots 7 et 8 : vendredi avant 23 h
 9. **Scénarios de test** : toujours disponibles, toujours marqués TEST.
 
 Constat du 6/11 à 01:25 : rien n'a été réglé hier avant 23 h, donc vendredi = valeurs par défaut (réveil 10:00 en TEST, coucher 01:00 **réel**, nuit du 6 au 7). La CLI Supabase n'est pas encore installée.
+
+---
+
+## 7. Journal d'avancement
+
+**Lot 0 (6/11, 01:40)** : projet Supabase `tixiaahenxcykhgzkmdu` (eu-west-3, 0 €), dépôt public `Aperrigot/nonrefundable`, Pages en ligne.
+
+**Lot 1 (6/11, 01:50)** : migrations `20261106004702_lot1_schema` et `20261106004812_lot1_pg_net_schema` appliquées. Tests `supabase/tests/lot1.sql` : 22/22. Accès anonyme par l'API : refusé partout (42501). Le tick tourne ; obligations du 6/11 figées (réveil 09:00–10:00 TEST, coucher 07/11 01:00–06:00 réel).
+Alertes restantes des advisors, acceptées volontairement :
+- `rls_enabled_no_policy` (INFO) sur les 3 tables du schéma `private` : aucun accès client voulu.
+- `authenticated_security_definer_function_executable` (WARN) sur `set_tomorrow`, `start_scenario`, `regenerate_shortcut_token` : ce sont les RPC prévues, elles vérifient `auth.uid()` et l'heure serveur.
+- `auth_leaked_password_protection` (WARN) : sans objet, aucune connexion par mot de passe.
