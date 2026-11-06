@@ -320,18 +320,137 @@ async function renderHistory() {
   app.innerHTML = `<h1>Historique</h1><p class="muted">Lot 7 à venir.</p>`;
 }
 
+// ---------------------------------------------------------------------------
+// Réglages
+// ---------------------------------------------------------------------------
+const SIGNAL_URL = `${SUPABASE_URL}/functions/v1/app-signal`;
+
+const hhmm = (ts) => new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
+const dateTime = (ts) => new Date(ts).toLocaleString('fr-FR', {
+  weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: TZ,
+});
+
+async function copy(text, msgEl) {
+  try {
+    await navigator.clipboard.writeText(text);
+    say(msgEl, 'Copié.');
+  } catch {
+    say(msgEl, 'Copie impossible. Sélectionne le texte à la main.', true);
+  }
+}
+
+function copyField(id, label, value) {
+  return `<div class="stack">
+    <label>${esc(label)}</label>
+    <div class="card code small" id="${id}-value">${esc(value)}</div>
+    <button class="btn secondary" data-copy="${id}">Copier</button>
+  </div>`;
+}
+
+function bindCopyButtons(msgEl) {
+  app.querySelectorAll('[data-copy]').forEach((b) => {
+    b.addEventListener('click', () => copy($(`#${b.dataset.copy}-value`).textContent, msgEl));
+  });
+}
+
+function shortcutGuide(token) {
+  const header = token ? `Bearer ${token}` : 'Bearer <ton jeton>';
+  return `
+    <ol class="guide">
+      <li>Ouvre l'app <b>Raccourcis</b>, onglet <b>Automatisation</b>, puis <b>+</b>.</li>
+      <li>Choisis <b>App</b>, sélectionne <b>Instagram</b>. Coche <b>Est ouverte</b> et <b>Est fermée</b>.</li>
+      <li>Choisis <b>Exécuter immédiatement</b> et désactive <b>Notifier lors de l'exécution</b>. Touche <b>Suivant</b>.</li>
+      <li>Touche <b>Nouveau raccourci vide</b>, ajoute l'action <b>Obtenir le contenu de l'URL</b>.</li>
+      <li>Colle l'URL Instagram ci-dessous à la place de « URL ».</li>
+      <li>Touche la flèche de l'action. Méthode : <b>POST</b>. Dans <b>En-têtes</b>, ajoute la clé <b>Authorization</b> avec la valeur ci-dessous.</li>
+      <li>Touche <b>OK</b>. Recommence avec <b>TikTok</b> et l'URL TikTok.</li>
+      <li>Vérifie : lance un scénario coucher ci-dessous, ouvre Instagram, reviens ici.</li>
+    </ol>
+    ${copyField('url-ig', 'URL Instagram', `${SIGNAL_URL}?app=instagram`)}
+    ${copyField('url-tt', 'URL TikTok', `${SIGNAL_URL}?app=tiktok`)}
+    ${token ? copyField('auth-header', 'Valeur de l\'en-tête Authorization', header) : ''}`;
+}
+
 async function renderSettings() {
-  const { data: { user } } = await sb.auth.getUser();
+  const { data: { user } } = DEMO ? { data: { user: { email: EMAIL } } } : await sb.auth.getUser();
+  const st = DEMO ? { has_token: false } : await rpc('get_shortcut_status');
+
+  const signal = st.last_signal_at
+    ? `Dernier signal : ${esc(st.last_signal_app === 'tiktok' ? 'TikTok' : 'Instagram')}, ${esc(dateTime(st.last_signal_at))}.`
+    : 'Aucun signal reçu.';
+
   app.innerHTML = `
     <h1>Réglages</h1>
+
+    <h2>Raccourcis</h2>
     <div class="stack">
-      <p class="muted">Connecté : ${esc(user?.email)}</p>
+      <p>${st.has_token ? `Jeton créé le ${esc(dateTime(st.token_created_at))}.` : 'Aucun jeton.'}<br>
+        <span class="muted">${signal}</span></p>
+      <button class="btn ${st.has_token ? 'secondary' : ''}" id="token">${st.has_token ? 'Régénérer le jeton' : 'Générer le jeton'}</button>
+      <p class="msg" id="token-msg"></p>
+      <div id="guide">${shortcutGuide(null)}</div>
+    </div>
+
+    <h2>Tester</h2>
+    <div class="stack">
+      <button class="btn secondary" id="scenario-bed">Scénario coucher (10 min)</button>
+      <p class="msg" id="scenario-msg"></p>
+    </div>
+
+    <h2>Compte</h2>
+    <div class="stack">
+      <p class="muted">${esc(user?.email)}</p>
       <button class="btn secondary" id="logout">Se déconnecter</button>
     </div>`;
+
+  bindCopyButtons($('#token-msg'));
+
+  $('#token').addEventListener('click', async (e) => {
+    if (st.has_token && !confirm('L\'ancien jeton cessera de fonctionner. Il faudra mettre à jour les deux automatisations.')) return;
+    e.target.disabled = true;
+    try {
+      const token = await rpc('regenerate_shortcut_token');
+      $('#guide').innerHTML = shortcutGuide(token);
+      bindCopyButtons($('#token-msg'));
+      say($('#token-msg'), 'Jeton affiché une seule fois. Garde cet écran ouvert le temps de créer les deux automatisations.');
+      $('#auth-header-value').scrollIntoView({ block: 'center' });
+    } catch (err) {
+      say($('#token-msg'), err.message, true);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+
+  $('#scenario-bed').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      const o = await rpc('start_scenario', { p_kind: 'bed' });
+      say($('#scenario-msg'), `Fenêtre TEST ouverte jusqu'à ${hhmm(o.window_end)}. Ouvre Instagram, puis reviens ici.`);
+      watchScenarioFine(o.id, $('#scenario-msg'));
+    } catch (err) {
+      say($('#scenario-msg'), err.message, true);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+
   $('#logout').addEventListener('click', async () => {
     await sb.auth.signOut();
     await route();
   });
+}
+
+// Au retour dans l'appli, on regarde si l'amende TEST du scénario est tombée.
+function watchScenarioFine(obligationId, msgEl) {
+  const check = async () => {
+    if (document.visibilityState !== 'visible' || !msgEl.isConnected) return;
+    const { data } = await sb.from('fines').select('reason, amount_cents').eq('obligation_id', obligationId).maybeSingle();
+    if (data) {
+      say(msgEl, `Amende TEST : ${data.reason} (${euros(data.amount_cents)}).`);
+      document.removeEventListener('visibilitychange', check);
+    }
+  };
+  document.addEventListener('visibilitychange', check);
 }
 
 const screens = {

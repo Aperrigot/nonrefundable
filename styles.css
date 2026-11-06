@@ -89,6 +89,11 @@ textarea { resize: none; }
 }
 
 .small { font-size: 14px; }
+.code.small { font-size: 13px; font-weight: 500; text-align: left; padding: 12px 14px; }
+
+.guide { padding-left: 22px; margin: 4px 0 8px; }
+.guide li { margin-bottom: 8px; }
+.guide b { color: var(--text); font-weight: 600; }
 
 .hero { text-align: center; margin: 9vh 0 32px; }
 .big {
@@ -160,3 +165,6 @@ textarea { resize: none; }
   user-select: none;
 }
 .tabbar a.active { color: var(--accent); }
+
+.card.code { padding: 18px; }
+.card.code.small { padding: 12px 14px; }
