@@ -88,6 +88,57 @@ textarea { resize: none; }
   padding: 18px;
 }
 
+.small { font-size: 14px; }
+
+.hero { text-align: center; margin: 9vh 0 32px; }
+.big {
+  font-size: 88px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.banner {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.card + .card, .card + .btn, .btn + .msg, .card + .msg { margin-top: 12px; }
+.card { padding: 0 16px; }
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--line);
+}
+.row:last-child { border-bottom: 0; }
+.row select { width: auto; min-width: 110px; padding: 10px 12px; text-align: center; }
+.row select:disabled { opacity: .4; }
+
+.switch { position: relative; display: inline-block; width: 51px; height: 31px; margin: 0; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; }
+.switch span { position: absolute; inset: 0; border-radius: 31px; background: var(--line); transition: background .2s; pointer-events: none; }
+.switch span::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 27px; height: 27px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform .2s;
+}
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(20px); }
+.switch input:disabled + span { opacity: .4; }
+
 .tabbar {
   position: fixed;
   left: 0; right: 0; bottom: 0;

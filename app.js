@@ -128,10 +128,188 @@ function renderTransfer(accessToken, refreshToken) {
 }
 
 // ---------------------------------------------------------------------------
-// Écrans
+// Outils d'affichage
+// ---------------------------------------------------------------------------
+const TZ = 'Europe/Paris';
+let timer = null;
+let serverOffset = 0; // ms à ajouter à l'horloge du téléphone pour obtenir l'heure serveur
+
+const euros = (cents) => (cents / 100).toLocaleString('fr-FR', {
+  style: 'currency', currency: 'EUR', minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2,
+});
+
+const dayLabel = (isoDay) => new Date(`${isoDay}T12:00:00Z`).toLocaleDateString('fr-FR', {
+  weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ,
+});
+
+const serverNow = () => Date.now() + serverOffset;
+
+function countdown(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, '0');
+  return h ? `${h} h ${String(m).padStart(2, '0')} min ${sec} s` : `${m} min ${sec} s`;
+}
+
+// Mode démo (?demo) : données fictives en mémoire, aucun appel à la base.
+// Sert à vérifier l'affichage sans session.
+const DEMO = new URLSearchParams(location.search).has('demo');
+
+function demoRpc(name, args) {
+  const now = new Date();
+  const lock = new Date(now.getTime() + 2 * 3600e3 + 14 * 60e3);
+  const home = {
+    server_now: now.toISOString(), today: '2026-11-06', month: '2026-11-01',
+    month_due_cents: 2000, month_test_cents: 1000, deposit_cents: 10000, fines_total_cents: 2000,
+    friend_name: 'Ami', real_start_date: '2026-11-06', last_signal_at: null, last_tick_at: now.toISOString(),
+    tonight: { day: '2026-11-06', start: '01:00', free: false, test: false, status: 'pending', active: false },
+    tomorrow: { day: '2026-11-07', set: false, wake_time: '10:00', wake_free: false, bed_time: '01:00', bed_free: false,
+      lock_at: lock.toISOString(), locked: false },
+    defaults: { wake_time: '10:00', bed_time: '01:00' },
+  };
+  if (name === 'get_home') return home;
+  if (name === 'set_tomorrow') return { day: home.tomorrow.day, lock_at: home.tomorrow.lock_at, server_now: home.server_now, args };
+  throw new Error(`Démo : ${name} non simulé.`);
+}
+
+async function rpc(name, args) {
+  if (DEMO) return demoRpc(name, args);
+  const { data, error } = await sb.rpc(name, args);
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+async function loadHome() {
+  const state = await rpc('get_home');
+  serverOffset = Date.parse(state.server_now) - Date.now();
+  return state;
+}
+
+function timeOptions(from, to, selected) {
+  // Pas de 15 min, en passant éventuellement minuit (20:00 → 04:00).
+  const out = [];
+  const [fh, fm] = from.split(':').map(Number);
+  const [th, tm] = to.split(':').map(Number);
+  let t = fh * 60 + fm;
+  const end = th * 60 + tm + (th * 60 + tm < t ? 1440 : 0);
+  for (; t <= end; t += 15) {
+    const v = `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+    out.push(`<option value="${v}"${v === selected ? ' selected' : ''}>${v}</option>`);
+  }
+  return out.join('');
+}
+
+// ---------------------------------------------------------------------------
+// Accueil
 // ---------------------------------------------------------------------------
 async function renderHome() {
-  app.innerHTML = `<h1>Accueil</h1><p class="muted">Lot 3 à venir.</p>`;
+  const s = await loadHome();
+  const remaining = s.deposit_cents - s.fines_total_cents;
+  const t = s.tomorrow;
+  const night = s.tonight;
+  const silentHours = s.last_signal_at ? (serverNow() - Date.parse(s.last_signal_at)) / 3.6e6 : null;
+
+  const banners = [];
+  if (!t.set && !t.locked) banners.push('Demain n\'est pas réglé.');
+  if (silentHours === null) banners.push('Aucun signal Raccourcis reçu pour l\'instant.');
+  else if (silentHours > 36) banners.push(`Aucun signal Raccourcis depuis ${Math.floor(silentHours)} h.`);
+
+  const caution = s.deposit_cents === 0
+    ? '<a class="muted" href="#/reglages">Caution non saisie</a>'
+    : remaining >= 0
+      ? `Reste de la caution : <span class="num">${euros(remaining)}</span>`
+      : `<span class="accent num">${euros(-remaining)} à compléter</span>`;
+
+  const nightText = !night ? '—'
+    : night.free ? 'Libre'
+    : `${night.start}${night.active ? ' · en cours' : ''}${night.test ? ' · TEST' : ''}`;
+  const wakeText = t.wake_free ? 'Libre' : `${t.wake_time}${t.set ? '' : ' · par défaut'}`;
+
+  app.innerHTML = `
+    ${banners.map((b) => `<div class="banner">${esc(b)}</div>`).join('')}
+    <section class="hero">
+      <div class="big num">${euros(s.month_due_cents)}</div>
+      <p class="muted">dû ce mois</p>
+      ${s.month_test_cents ? `<p class="muted small">TEST : ${euros(s.month_test_cents)}</p>` : ''}
+      <p>${caution}</p>
+    </section>
+    <div class="card">
+      <div class="row"><span>Coucher ce soir</span><span class="num">${esc(nightText)}</span></div>
+      <div class="row"><span>Réveil demain</span><span class="num">${esc(wakeText)}</span></div>
+    </div>
+    <a class="btn ${t.locked ? 'secondary' : ''}" href="#/demain">${t.locked ? 'Demain est verrouillé' : 'Régler demain'}</a>`;
+}
+
+// ---------------------------------------------------------------------------
+// Régler demain
+// ---------------------------------------------------------------------------
+async function renderTomorrow() {
+  const s = await loadHome();
+  const t = s.tomorrow;
+  const lockAt = Date.parse(t.lock_at);
+  const locked = t.locked || serverNow() >= lockAt;
+
+  app.innerHTML = `
+    <h1>Régler demain</h1>
+    <p class="muted">${esc(dayLabel(t.day))}</p>
+    <p class="${locked ? 'accent' : ''}" id="lock">${locked ? 'Verrouillé depuis 23:00.' : ''}</p>
+    <div class="card">
+      <div class="row"><span>Photo avant</span>
+        <select id="wake" ${locked ? 'disabled' : ''}>${timeOptions('05:00', '12:00', t.wake_time)}</select></div>
+      <div class="row"><span>Réveil libre</span>${toggle('wake-free', t.wake_free, locked)}</div>
+    </div>
+    <div class="card">
+      <div class="row"><span>Coucher à</span>
+        <select id="bed" ${locked ? 'disabled' : ''}>${timeOptions('20:00', '04:00', t.bed_time)}</select></div>
+      <div class="row"><span>Coucher libre</span>${toggle('bed-free', t.bed_free, locked)}</div>
+    </div>
+    ${locked ? '' : '<button class="btn" id="save">Enregistrer</button>'}
+    <p class="msg" id="save-msg">${t.set ? 'Réglé.' : locked ? 'Valeurs par défaut appliquées.' : 'Pas encore réglé.'}</p>`;
+
+  const syncDisabled = () => {
+    $('#wake').disabled = locked || $('#wake-free').checked;
+    $('#bed').disabled = locked || $('#bed-free').checked;
+  };
+  syncDisabled();
+  if (locked) return;
+
+  $('#wake-free').addEventListener('change', syncDisabled);
+  $('#bed-free').addEventListener('change', syncDisabled);
+
+  const tick = () => {
+    const left = lockAt - serverNow();
+    if (left <= 0) {
+      clearInterval(timer);
+      renderTomorrow();
+      return;
+    }
+    $('#lock').textContent = `Verrouillage dans ${countdown(left)}.`;
+  };
+  tick();
+  timer = setInterval(tick, 1000);
+
+  $('#save').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      await rpc('set_tomorrow', {
+        p_wake_time: $('#wake').value,
+        p_wake_free: $('#wake-free').checked,
+        p_bed_time: $('#bed').value,
+        p_bed_free: $('#bed-free').checked,
+      });
+      say($('#save-msg'), 'Enregistré.');
+    } catch (err) {
+      say($('#save-msg'), err.message, true);
+      if (err.message.startsWith('Verrouillé')) setTimeout(renderTomorrow, 1500);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+}
+
+function toggle(id, checked, disabled) {
+  return `<label class="switch"><input type="checkbox" id="${id}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}><span></span></label>`;
 }
 
 async function renderProof() {
@@ -158,20 +336,27 @@ async function renderSettings() {
 
 const screens = {
   accueil: { tab: 'accueil', render: renderHome },
+  demain: { tab: 'accueil', render: renderTomorrow },
   photo: { tab: 'photo', render: renderProof },
   historique: { tab: 'historique', render: renderHistory },
   reglages: { tab: 'reglages', render: renderSettings },
 };
 
 async function route() {
+  clearInterval(timer);
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) return renderLogin();
+  if (!session && !DEMO) return renderLogin();
   const name = location.hash.replace(/^#\/?/, '') || 'accueil';
   const screen = screens[name] || screens.accueil;
   tabbar.hidden = false;
   tabbar.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.dataset.tab === screen.tab));
   window.scrollTo(0, 0);
-  await screen.render();
+  try {
+    await screen.render();
+  } catch (err) {
+    app.innerHTML = `<h1>Erreur</h1><p class="msg error">${esc(err.message)}</p>
+      <button class="btn secondary" onclick="location.reload()">Réessayer</button>`;
+  }
 }
 
 // ---------------------------------------------------------------------------
