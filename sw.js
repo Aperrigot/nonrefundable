@@ -1,6 +1,6 @@
 // Service worker : coquille hors ligne (réseau d'abord, cache en secours).
 // Les appels à Supabase (autre origine) ne passent jamais par le cache.
-const VERSION = 'nr-v4';
+const VERSION = 'nr-v5';
 const SHELL = [
   './',
   './index.html',

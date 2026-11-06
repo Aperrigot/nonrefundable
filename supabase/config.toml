@@ -423,3 +423,6 @@ enabled = true
 
 [functions.app-signal]
 verify_jwt = false
+
+[functions.submit-proof]
+verify_jwt = false

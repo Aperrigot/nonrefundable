@@ -312,8 +312,141 @@ function toggle(id, checked, disabled) {
   return `<label class="switch"><input type="checkbox" id="${id}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}><span></span></label>`;
 }
 
+// ---------------------------------------------------------------------------
+// Preuve de réveil
+// ---------------------------------------------------------------------------
+const PROOF_URL = `${SUPABASE_URL}/functions/v1/submit-proof`;
+const MAX_PHOTO_BYTES = 140 * 1024; // marge sous la limite serveur de 150 Ko
+
+function canvasToJpeg(canvas, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+}
+
+// Redimensionne et recompresse jusqu'à passer sous 140 Ko. L'orientation EXIF
+// est appliquée par le navigateur au décodage ; les métadonnées ne sont pas recopiées.
+async function compressPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    let side = 1280;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const scale = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      for (const q of [0.72, 0.6, 0.5, 0.4]) {
+        const blob = await canvasToJpeg(canvas, q);
+        if (blob && blob.size <= MAX_PHOTO_BYTES) return blob;
+      }
+      side = Math.round(side * 0.75);
+    }
+    throw new Error('Compression impossible.');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function sendPhoto(blob) {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) throw new Error('Session expirée. Reconnecte-toi.');
+  const res = await fetch(PROOF_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'image/jpeg' },
+    body: blob,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.status >= 500) throw new Error('Serveur indisponible. Réessaie.');
+  return body;
+}
+
+function proofStateText(w) {
+  switch (w.state) {
+    case 'none': return 'Aucun réveil prévu aujourd\'hui.';
+    case 'free': return 'Réveil libre aujourd\'hui.';
+    case 'done': return `Faite à ${hhmm(w.proof_at)}.`;
+    case 'failed': return `Ratée. Fenêtre fermée à ${hhmm(w.window_end)}.`;
+    case 'not_open': return `Fenêtre pas encore ouverte. Ouverture à ${hhmm(w.window_start)}.`;
+    default: return `Fenêtre ouverte jusqu'à ${hhmm(w.window_end)}.`;
+  }
+}
+
 async function renderProof() {
-  app.innerHTML = `<h1>Preuve de réveil</h1><p class="muted">Lot 5 à venir.</p>`;
+  const w = DEMO
+    ? { state: 'open', object: 'une fourchette', window_start: new Date().toISOString(),
+        window_end: new Date(Date.now() + 40 * 60e3).toISOString(), server_now: new Date().toISOString(), test: true }
+    : await rpc('get_wake_status');
+  serverOffset = Date.parse(w.server_now) - Date.now();
+  const canShoot = ['open', 'not_open', 'failed'].includes(w.state);
+
+  app.innerHTML = `
+    <h1>Preuve de réveil</h1>
+    ${w.object ? `
+      <div class="card object">
+        <p class="muted small">Objet du jour${w.scenario ? ' · scénario TEST' : w.test ? ' · TEST' : ''}</p>
+        <p class="object-label">${esc(w.object)}</p>
+      </div>` : ''}
+    <p class="state ${w.state === 'failed' ? 'accent' : ''}" id="state">${esc(proofStateText(w))}</p>
+    <p class="muted num" id="left"></p>
+    ${canShoot ? `
+      <input type="file" id="camera" accept="image/*" capture="environment" hidden>
+      <button class="btn" id="shoot">Prendre la photo</button>` : ''}
+    <button class="btn secondary" id="retry" hidden>Réessayer l'envoi</button>
+    <p class="msg" id="proof-msg"></p>`;
+
+  if (w.state === 'open' || w.state === 'not_open') {
+    const target = Date.parse(w.state === 'open' ? w.window_end : w.window_start);
+    const tickLeft = () => {
+      const left = target - serverNow();
+      if (left <= 0) {
+        clearInterval(timer);
+        renderProof();
+        return;
+      }
+      $('#left').textContent = `${w.state === 'open' ? 'Reste' : 'Ouverture dans'} ${countdown(left)}.`;
+    };
+    tickLeft();
+    timer = setInterval(tickLeft, 1000);
+  }
+  if (!canShoot) return;
+
+  let pending = null;
+  const submit = async () => {
+    const msg = $('#proof-msg');
+    say(msg, 'Envoi…');
+    $('#retry').hidden = true;
+    try {
+      const r = DEMO ? { accepted: true } : await sendPhoto(pending);
+      if (r.accepted) {
+        say(msg, r.storage_failed ? 'Acceptée (photo non stockée, erreur serveur).' : 'Acceptée.');
+        pending = null;
+        setTimeout(renderProof, 1200);
+      } else {
+        say(msg, r.reason || 'Refusée.', true);
+      }
+    } catch (err) {
+      say(msg, err.message, true);
+      $('#retry').hidden = false;
+    }
+  };
+
+  $('#shoot').addEventListener('click', () => $('#camera').click());
+  $('#retry').addEventListener('click', submit);
+  $('#camera').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      say($('#proof-msg'), 'Compression…');
+      pending = await compressPhoto(file);
+    } catch (err) {
+      say($('#proof-msg'), err.message, true);
+      return;
+    }
+    await submit();
+  });
 }
 
 async function renderHistory() {
@@ -394,6 +527,7 @@ async function renderSettings() {
     <h2>Tester</h2>
     <div class="stack">
       <button class="btn secondary" id="scenario-bed">Scénario coucher (10 min)</button>
+      <button class="btn secondary" id="scenario-wake">Scénario photo (s'ouvre dans 1 à 2 min)</button>
       <p class="msg" id="scenario-msg"></p>
     </div>
 
@@ -427,6 +561,19 @@ async function renderSettings() {
       const o = await rpc('start_scenario', { p_kind: 'bed' });
       say($('#scenario-msg'), `Fenêtre TEST ouverte jusqu'à ${hhmm(o.window_end)}. Ouvre Instagram, puis reviens ici.`);
       watchScenarioFine(o.id, $('#scenario-msg'));
+    } catch (err) {
+      say($('#scenario-msg'), err.message, true);
+    } finally {
+      e.target.disabled = false;
+    }
+  });
+
+  $('#scenario-wake').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try {
+      const o = await rpc('start_scenario', { p_kind: 'wake' });
+      say($('#scenario-msg'), `Fenêtre photo TEST de ${hhmm(o.window_start)} à ${hhmm(o.window_end)}. Essaie une photo maintenant (refusée), puis après l'ouverture (acceptée).`);
+      setTimeout(() => { location.hash = '#/photo'; }, 2500);
     } catch (err) {
       say($('#scenario-msg'), err.message, true);
     } finally {

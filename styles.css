@@ -168,3 +168,10 @@ textarea { resize: none; }
 
 .card.code { padding: 18px; }
 .card.code.small { padding: 12px 14px; }
+
+.object { padding: 16px; text-align: center; }
+.object p { margin: 0; }
+.object-label { font-size: 26px; font-weight: 700; color: var(--accent); margin-top: 4px !important; }
+.state { font-size: 19px; margin: 20px 0 4px; }
+#left { margin-bottom: 20px; }
+.btn + .btn { margin-top: 12px; }
