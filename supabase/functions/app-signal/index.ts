@@ -1,5 +1,6 @@
 // Appelée par l'automatisation Raccourcis à l'ouverture et à la fermeture
 // d'Instagram ou de TikTok. Authentification par jeton secret (pas de JWT).
+// GET accepté : Raccourcis perd parfois la connexion sur un POST sans corps.
 // Toute la logique (heure serveur, fenêtre de coucher, amende unique) est en SQL.
 import { createClient } from 'npm:@supabase/supabase-js@2.118.0';
 
@@ -8,17 +9,20 @@ const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SE
 });
 
 const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  });
 
 Deno.serve(async (req) => {
-  if (req.method !== 'POST') return json({ ok: false, error: 'method' }, 405);
+  if (req.method !== 'POST' && req.method !== 'GET') return json({ ok: false, error: 'method' }, 405);
 
   const token = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
   if (!token) return json({ ok: false, error: 'token' }, 401);
 
   // L'app peut venir du corps JSON {"app": "instagram"} ou de ?app=instagram.
   let app = new URL(req.url).searchParams.get('app') ?? '';
-  if (!app) {
+  if (!app && req.method === 'POST') {
     try {
       const body = await req.json();
       app = String(body?.app ?? '');

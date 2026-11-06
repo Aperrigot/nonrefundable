@@ -582,7 +582,7 @@ function shortcutGuide(token) {
       <li>Choisis <b>Exécuter immédiatement</b> et désactive <b>Notifier lors de l'exécution</b>. Touche <b>Suivant</b>.</li>
       <li>Touche <b>Nouveau raccourci vide</b>, ajoute l'action <b>Obtenir le contenu de l'URL</b>.</li>
       <li>Colle l'URL Instagram ci-dessous à la place de « URL ».</li>
-      <li>Touche la flèche de l'action. Méthode : <b>POST</b>. Dans <b>En-têtes</b>, ajoute la clé <b>Authorization</b> avec la valeur ci-dessous.</li>
+      <li>Touche la flèche de l'action. Laisse la méthode sur <b>GET</b>. Dans <b>En-têtes</b>, ajoute la clé <b>Authorization</b> avec la valeur ci-dessous.</li>
       <li>Touche <b>OK</b>. Recommence avec <b>TikTok</b> et l'URL TikTok.</li>
       <li>Vérifie : lance un scénario coucher ci-dessous, ouvre Instagram, reviens ici.</li>
     </ol>
