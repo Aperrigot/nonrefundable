@@ -291,7 +291,7 @@ Alertes restantes des advisors, acceptées volontairement :
 - `authenticated_security_definer_function_executable` (WARN) sur `set_tomorrow`, `start_scenario`, `regenerate_shortcut_token` : ce sont les RPC prévues, elles vérifient `auth.uid()` et l'heure serveur.
 - `auth_leaked_password_protection` (WARN) : sans objet, aucune connexion par mot de passe.
 
-**Lots 2 à 7 (6/11, 02:00 → 03:10)** :
+**Lots 2 à 7 (6/11, 01:55 → 02:15)** :
 - Lot 2 : PWA (manifest, icônes 180/192/512 opaques, service worker réseau d'abord), connexion par lien collé ou par code transféré depuis Safari (`refresh_token`). Site URL Supabase réglée sur l'URL Pages. Inscriptions désactivées (vérifié).
 - Lot 3 : RPC `get_home`, écrans Accueil et Régler demain (compte à rebours sur l'heure serveur, verrouillage à 23:00).
 - Lot 4 : Edge Function `app-signal` (jeton en en-tête, `?app=instagram|tiktok`), RPC `get_shortcut_status`, guide pas à pas, scénario coucher.
